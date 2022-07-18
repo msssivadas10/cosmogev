@@ -353,7 +353,7 @@ class Cosmology:
 
         ka, kb = 1e-06, 1e+06 # integration limits
 
-        # the sharp-k filter is a step function with value 1 for scales less than kr = pi
+        # the sharp-k filter is a step function with value 1 for scales less than kr = 1
         # and 0 otherwise. to compute the variance in this case, the upper limit changed 
         # to the corrsponding scale to r, as after that the integrand is 0. 
         if filter == 'sharpk':
@@ -483,7 +483,7 @@ class Genextreme:
             Value of the linear variance in the cell.
 
         """
-        return self.cm.variance(self.cellsize, z, filter = 'sharpk')
+        return self.cm.variance(self.cellsize, z, filter = 'tophat')
 
     def logVariance(self, lin: float):
         r"""
@@ -678,7 +678,8 @@ class Genextreme:
 
         def f(x, gamma1):
             g1, g2, g3 = gk(1,x), gk(2,x), gk(3,x)
-            return gamma1 + (g3 - 3*g1*g2 + 2*g1**3) / (g2 - g1**2)**1.5
+            y = gamma1 + (g3 - 3*g1*g2 + 2*g1**3) / (g2 - g1**2)**1.5
+            return y
 
 
         s2_lin = self.linearVariance(z)   # linear field variance
@@ -690,7 +691,7 @@ class Genextreme:
         abar   = self.mean(s2_lin) # mean value
         gamma1 = self.skewness(s2_meas, z) # skewness
 
-        shape = newton( f, 0.01, args = (gamma1, ) ) # shape parameter
+        shape = newton( f, 1e-1, args = (gamma1, ) ) # shape parameter
         scale = abs(shape) * s2_meas**0.5 * ( gk(2, shape) - gk(1, shape)**2 )**(-0.5) # scale
         loc   = abar - (gk(1, shape) - 1) * scale / shape # location parameter
 
@@ -712,15 +713,36 @@ if __name__ == '__main__':
 
 
     # mill: h=0.73, Om0=0.25, Ob0=0.045, Ode0=0.75, sigma8=0.9, ns=1.0, Tcmb0=2.7255K
-    c = Cosmology(0.73, 0.25, 0.045, 1.0, 0.9, ).normalizePower()
-    p = Genextreme(2.0, c).parametrize(0)
+    mill = Cosmology(0.73, 0.25, 0.045, 1.0, 0.9, ).normalizePower()
 
-    x = np.linspace(-3, 2, 21)
-    y = p.pdf(x)
+    delta = np.loadtxt("./data/mmfieldz0.csv", delimiter=',', unpack=True)[2]
+
+    ngrid    = 32
+    boxsize  = 62.5
+    cellsize = boxsize / ngrid
+
+    # get the over density field (log)
+
+    delta = delta / delta.mean() - 1
+    lnd   = np.log( delta + 1 )
 
     import matplotlib.pyplot as plt
 
-    plt.figure()
-    # plt.loglog()
-    plt.plot(x, y, '-o')
+    pdist, vals = np.histogram( lnd, bins = 51, range = [-5, 5], density = True, )
+    vals  = 0.5 * ( vals[:-1] + vals[1:] )
+
+    # get best fitting gev distribution
+
+    shape, loc, scale = genextreme.fit( lnd )
+    
+    gev = Genextreme(cellsize, mill)
+    gev.parametrize(0.0)
+
+    plt.figure( figsize = [12, 6] )
+    plt.plot( vals, genextreme.pdf( vals, shape, loc, scale ), '-o', label = 'best fit', color = 'tab:green' )
+    plt.plot( vals, gev.pdf( vals ), '-o', label = 'computed', color = 'tab:blue' )
+    plt.legend(fontsize = 16)
+    plt.xlabel( 'A' )
+    plt.ylabel( 'P(A)' )
     plt.show()
+
